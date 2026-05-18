@@ -183,15 +183,52 @@ export class BridgeService {
     }
 
     try {
-      console.log(`💬 Telegram → WhatsApp: ${relayEvent.text.substring(0, 50)}...`)
-      await this.baileys.sendMessage(whatsappJid, relayEvent.text)
+      // Si hay media (imagen, video, documento)
+      if (relayEvent.media) {
+        console.log('📸 Telegram envió media, descargando...')
+        const mediaPath = await this.telegram.downloadMedia(relayEvent.media)
+        
+        if (mediaPath) {
+          // Enviar imagen a WhatsApp
+          await this.baileys.sendImage(whatsappJid, mediaPath, relayEvent.text || undefined)
+          
+          // Limpiar archivo temporal
+          await fs.unlink(mediaPath).catch(() => {})
+          
+          const caption = relayEvent.text ? `${relayEvent.text}` : '📸 Imagen'
+          console.log(`📸 Imagen relayada a WhatsApp: ${caption}`)
+          
+          await this.db.logMessage({
+            fromPlatform: 'telegram',
+            toPlatform: 'whatsapp',
+            sender: botKey,
+            content: `[IMAGEN] ${relayEvent.text || 'Sin texto'}`
+          })
+        } else {
+          console.error('❌ No se pudo descargar la media de Telegram')
+          if (relayEvent.text) {
+            // Enviar al menos el texto si la media falló
+            await this.baileys.sendMessage(whatsappJid, relayEvent.text)
+            await this.db.logMessage({
+              fromPlatform: 'telegram',
+              toPlatform: 'whatsapp',
+              sender: botKey,
+              content: relayEvent.text
+            })
+          }
+        }
+      } else if (relayEvent.text) {
+        // Solo texto
+        console.log(`💬 Telegram → WhatsApp: ${relayEvent.text.substring(0, 50)}...`)
+        await this.baileys.sendMessage(whatsappJid, relayEvent.text)
 
-      await this.db.logMessage({
-        fromPlatform: 'telegram',
-        toPlatform: 'whatsapp',
-        sender: botKey,
-        content: relayEvent.text
-      })
+        await this.db.logMessage({
+          fromPlatform: 'telegram',
+          toPlatform: 'whatsapp',
+          sender: botKey,
+          content: relayEvent.text
+        })
+      }
     } catch (error) {
       console.error('❌ Error al enviar a WhatsApp:', error)
     }

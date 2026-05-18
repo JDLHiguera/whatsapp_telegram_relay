@@ -124,19 +124,68 @@ export class TelegramService extends EventEmitter {
       }
 
       const text = String(event.message.message || event.message.text || '').trim()
-      if (!text) {
+      
+      // Detectar si hay media (imagen, video, documento)
+      const hasMedia = event.message.photo || event.message.video || event.message.document
+      
+      // Si no hay texto ni media, ignorar
+      if (!text && !hasMedia) {
         return
       }
 
       const relayEvent: RelayEvent = {
         telegramChat: this.relayBotUsername,
         text,
-        messageId: event.message.id
+        messageId: event.message.id,
+        media: hasMedia ? event.message : undefined
       }
 
       this.emit('message', relayEvent)
     } catch (error) {
       console.error('Error procesando mensaje entrante de Telegram:', error)
+    }
+  }
+
+  /**
+   * Descargar media desde Telegram y guardarla localmente
+   */
+  async downloadMedia(message: any): Promise<string | null> {
+    if (!this.isConnected || !this.client) {
+      return null
+    }
+
+    try {
+      const tempDir = path.join(__dirname, '../../data/temp')
+      await fs.mkdir(tempDir, { recursive: true })
+      
+      // Determinar extensión según tipo de media
+      let extension = 'bin'
+      if (message.photo) {
+        extension = 'jpg'
+      } else if (message.video) {
+        extension = 'mp4'
+      } else if (message.document) {
+        extension = message.document.mimeType?.split('/')[1] || 'bin'
+      }
+      
+      const tempFilePath = path.join(tempDir, `media_${Date.now()}.${extension}`)
+      
+      // Usar downloadFile con media del mensaje
+      // @ts-ignore
+      const buffer = await this.client.downloadFile(message.media)
+      
+      if (!buffer) {
+        console.error('❌ Buffer vacío al descargar media de Telegram')
+        return null
+      }
+      
+      await fs.writeFile(tempFilePath, buffer)
+      
+      console.log(`✅ Media descargada: ${tempFilePath}`)
+      return tempFilePath
+    } catch (error) {
+      console.error('❌ Error descargando media de Telegram:', error)
+      return null
     }
   }
 
