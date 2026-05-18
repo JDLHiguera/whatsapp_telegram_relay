@@ -31,6 +31,7 @@ export interface Config {
   telegramPhoneNumber?: string
   whatsappPhoneNumber: string
   alertBotToken?: string
+  alertBotAdminChatId?: number
   alertBotSubscribersPath: string
   logFilePath: string
   runtimeStatePath: string
