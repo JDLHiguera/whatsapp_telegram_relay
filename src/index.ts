@@ -49,6 +49,7 @@ async function main(): Promise<void> {
     alertBot = new AlertBotService({
       token: config.alertBotToken,
       adminChatId: config.alertBotAdminChatId,
+      relayResetHandler: () => bridge.resetRelayState(),
       subscribersPath: config.alertBotSubscribersPath,
       logFilePath: config.logFilePath,
       statusProvider: buildStatusSnapshot

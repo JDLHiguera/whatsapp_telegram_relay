@@ -150,12 +150,14 @@ Escribe en el chat del bot:
 | **QR**, `Código QR`, `Escanear` | Ver el código QR actual (si está disponible) |
 | `Suscribirme`, `Alertas on` | Activar notificaciones |
 | `Desuscribirme`, `Alertas off` | Desactivar notificaciones |
+| `Reset relay`, `Resetrelay`, `Reiniciar relay` | Borrar el estado persistido del chat fijado |
 | `Ayuda` | Ver instrucciones |
 
 ### Características principales
 
 - ✅ **QR automático en Telegram**: El código QR se envía como foto cuando se necesita autenticar
 - ✅ **Botón de QR manual**: Usa `/qr` si quieres sincronizar de nuevo
+- ✅ **Reset desde Telegram**: Usa `/resetrelay` desde el chat admin para borrar el estado persistido y volver a fijar el relay en el siguiente mensaje de WhatsApp
 - ✅ **Detecta arranques inesperados**: Sabe si el sistema cayó sin un cierre limpio
 - ✅ **Gracias limpio**: Maneja SIGINT, SIGTERM, excepciones no capturadas
 - ✅ **Dashboard interactivo**: Acceso a todo desde botones inline
