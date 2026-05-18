@@ -12,6 +12,7 @@ interface StatusProvider {
 interface AlertBotOptions {
   token?: string
   adminChatId?: number
+  relayResetHandler?: () => Promise<void> | void
   subscribersPath: string
   logFilePath: string
   statusProvider: StatusProvider
@@ -25,6 +26,7 @@ export class AlertBotService {
   private bot: TelegramBot | null = null
   private readonly token?: string
   private readonly adminChatId?: number
+  private readonly relayResetHandler?: () => Promise<void> | void
   private readonly subscribersPath: string
   private readonly logFilePath: string
   private readonly statusProvider: StatusProvider
@@ -35,6 +37,7 @@ export class AlertBotService {
   constructor(options: AlertBotOptions) {
     this.token = options.token?.trim()
     this.adminChatId = options.adminChatId
+    this.relayResetHandler = options.relayResetHandler
     this.subscribersPath = options.subscribersPath
     this.logFilePath = options.logFilePath
     this.statusProvider = options.statusProvider
@@ -148,6 +151,11 @@ export class AlertBotService {
     if (this.matches(text, ['refrescar', 'refresh'])) {
       await this.renderDashboard(chatId, 'main')
     }
+
+    if (this.matches(text, ['resetrelay', 'reset relay', 'reiniciar relay', 'limpiar relay'])) {
+      await this.handleRelayReset(chatId)
+      return
+    }
   }
 
   private async handleCallback(query: TelegramBot.CallbackQuery): Promise<void> {
@@ -195,6 +203,11 @@ export class AlertBotService {
 
     if (data === 'dashboard:refresh') {
       await this.renderDashboard(chatId, 'main', undefined, query.message?.message_id)
+      return
+    }
+
+    if (data === 'relay:reset') {
+      await this.handleRelayReset(chatId, query.message?.message_id)
     }
   }
 
@@ -309,6 +322,9 @@ export class AlertBotService {
           [
             { text: 'Refrescar', callback_data: 'dashboard:refresh' },
             { text: 'Ayuda', callback_data: 'dashboard:help' }
+          ],
+          [
+            { text: '🧹 Reset relay', callback_data: 'relay:reset' }
           ]
         ]
       }
@@ -407,6 +423,21 @@ export class AlertBotService {
       JSON.stringify({ subscribers: [...this.subscribers] }, null, 2),
       'utf8'
     )
+  }
+
+  private async handleRelayReset(chatId: number, messageId?: number): Promise<void> {
+    if (this.adminChatId && chatId !== this.adminChatId) {
+      await this.reply(chatId, '⚠️ Este comando solo está permitido desde el chat admin configurado.')
+      return
+    }
+
+    if (!this.relayResetHandler) {
+      await this.reply(chatId, '⚠️ No hay handler de reseteo configurado en la aplicación.')
+      return
+    }
+
+    await this.relayResetHandler()
+    await this.renderDashboard(chatId, 'main', '🧹 Relay reseteado. El próximo mensaje de WhatsApp volverá a fijar el chat.', messageId)
   }
 
   private isSubscribed(chatId: number): boolean {
