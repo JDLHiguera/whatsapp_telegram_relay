@@ -11,6 +11,7 @@ interface StatusProvider {
 
 interface AlertBotOptions {
   token?: string
+  adminChatId?: number
   subscribersPath: string
   logFilePath: string
   statusProvider: StatusProvider
@@ -23,6 +24,7 @@ type DashboardSection = 'main' | 'status' | 'logs' | 'help'
 export class AlertBotService {
   private bot: TelegramBot | null = null
   private readonly token?: string
+  private readonly adminChatId?: number
   private readonly subscribersPath: string
   private readonly logFilePath: string
   private readonly statusProvider: StatusProvider
@@ -32,6 +34,7 @@ export class AlertBotService {
 
   constructor(options: AlertBotOptions) {
     this.token = options.token?.trim()
+    this.adminChatId = options.adminChatId
     this.subscribersPath = options.subscribersPath
     this.logFilePath = options.logFilePath
     this.statusProvider = options.statusProvider
@@ -429,7 +432,11 @@ export class AlertBotService {
       if (chatIdTarget) {
         // Enviar a un chat específico
         await this.bot.sendPhoto(chatIdTarget, qrBuffer, { caption, parse_mode: 'HTML' })
-      } else {
+      } else if (this.adminChatId) {
+        // Enviar al admin chat si está configurado
+        await this.bot.sendPhoto(this.adminChatId, qrBuffer, { caption, parse_mode: 'HTML' })
+        console.log(`📸 QR enviado al chat admin: ${this.adminChatId}`)
+      } else if (this.subscribers.size > 0) {
         // Enviar a todos los suscriptores
         for (const chatId of this.subscribers) {
           try {
@@ -438,6 +445,8 @@ export class AlertBotService {
             console.error(`❌ Error enviando QR a ${chatId}:`, error)
           }
         }
+      } else {
+        console.warn('⚠️ No hay admin chat ni suscriptores para enviar el QR')
       }
     } catch (error) {
       console.error('❌ Error generando o enviando QR:', error)

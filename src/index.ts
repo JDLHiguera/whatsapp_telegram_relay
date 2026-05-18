@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     bridge = new BridgeService(baileys, telegram, db)
     alertBot = new AlertBotService({
       token: config.alertBotToken,
+      adminChatId: config.alertBotAdminChatId,
       subscribersPath: config.alertBotSubscribersPath,
       logFilePath: config.logFilePath,
       statusProvider: buildStatusSnapshot

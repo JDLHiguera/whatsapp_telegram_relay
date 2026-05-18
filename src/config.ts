@@ -16,6 +16,7 @@ export const config: Config = {
   telegramPhoneNumber: process.env.TELEGRAM_PHONE_NUMBER || undefined,
   whatsappPhoneNumber: process.env.WHATSAPP_PHONE_NUMBER || '',
   alertBotToken: process.env.TELEGRAM_ALERT_BOT_TOKEN || undefined,
+  alertBotAdminChatId: process.env.TELEGRAM_ALERT_ADMIN_CHAT_ID ? parseInt(process.env.TELEGRAM_ALERT_ADMIN_CHAT_ID) : undefined,
   alertBotSubscribersPath: process.env.TELEGRAM_ALERT_SUBSCRIBERS_PATH || path.join(__dirname, '../data/alert_subscribers.json'),
   logFilePath: process.env.LOG_FILE_PATH || path.join(__dirname, '../data/server.log'),
   runtimeStatePath: process.env.RUNTIME_STATE_PATH || path.join(__dirname, '../data/runtime_state.json'),
