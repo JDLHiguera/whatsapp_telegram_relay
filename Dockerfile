@@ -10,7 +10,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci --include=dev
 
 FROM dependencies AS build
 
@@ -25,9 +25,10 @@ FROM node:20-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 
-COPY --from=dependencies /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
 COPY package*.json ./
+RUN npm ci --only=prod
+
+COPY --from=build /app/dist ./dist
 
 RUN mkdir -p /app/auth_info /app/data
 
