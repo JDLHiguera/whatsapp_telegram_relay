@@ -136,6 +136,29 @@ export class BaileysService extends EventEmitter {
   }
 
   /**
+   * Enviar imagen
+   */
+  async sendImage(jid: string, imagePath: string, caption?: string): Promise<any> {
+    if (!this.sock) {
+      throw new Error('WhatsApp no está conectado')
+    }
+
+    try {
+      const fs = await import('fs/promises')
+      const imageBuffer = await fs.readFile(imagePath)
+      
+      const message = await this.sock.sendMessage(jid, {
+        image: imageBuffer,
+        caption: caption || undefined
+      })
+      return message
+    } catch (error) {
+      console.error('Error al enviar imagen:', error)
+      throw error
+    }
+  }
+
+  /**
    * Obtener información de un número
    */
   async checkNumberExists(number: string): Promise<boolean> {

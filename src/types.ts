@@ -65,4 +65,5 @@ export interface RelayEvent {
   telegramChat?: string
   text: string
   messageId?: number
+  media?: any  // GramJS message object con photo/video/document
 }
