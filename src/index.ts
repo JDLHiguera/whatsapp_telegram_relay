@@ -13,6 +13,8 @@ let telegram: TelegramService
 let bridge: BridgeService
 let alertBot: AlertBotService | null = null
 let shuttingDown = false
+let whatsappDisconnectTimer: ReturnType<typeof setTimeout> | null = null
+let whatsappDisconnectNotified = false
 
 /**
  * Función principal de inicialización
@@ -56,6 +58,20 @@ async function main(): Promise<void> {
     })
 
     baileys.on('connected', () => {
+      if (whatsappDisconnectTimer) {
+        clearTimeout(whatsappDisconnectTimer)
+        whatsappDisconnectTimer = null
+      }
+
+      if (whatsappDisconnectNotified) {
+        whatsappDisconnectNotified = false
+        void alertBot?.notify(
+          'WhatsApp reconectado',
+          'La desconexión fue temporal y la sesión volvió a quedar activa.',
+          'info'
+        )
+      }
+
       void alertBot?.notify('WhatsApp conectado', 'La sesión de WhatsApp quedó activa y lista para relay.', 'info')
     })
 
@@ -73,7 +89,20 @@ async function main(): Promise<void> {
       const message = info?.shouldReconnect
         ? 'WhatsApp perdió conexión y está intentando reconectar.'
         : 'WhatsApp se desconectó y necesita re-autenticación.'
-      void alertBot?.notify('WhatsApp desconectado', message, info?.shouldReconnect ? 'warning' : 'error')
+
+      if (!info?.shouldReconnect) {
+        void alertBot?.notify('WhatsApp desconectado', message, 'error')
+        return
+      }
+
+      if (whatsappDisconnectTimer) {
+        clearTimeout(whatsappDisconnectTimer)
+      }
+
+      whatsappDisconnectTimer = setTimeout(() => {
+        whatsappDisconnectNotified = true
+        void alertBot?.notify('WhatsApp desconectado', message, 'warning')
+      }, 10000)
     })
 
     telegram.on('connected', () => {
@@ -135,6 +164,11 @@ async function cleanup(): Promise<void> {
   console.log('\n🛑 Deteniendo servicios...')
 
   try {
+    if (whatsappDisconnectTimer) {
+      clearTimeout(whatsappDisconnectTimer)
+      whatsappDisconnectTimer = null
+    }
+
     await writeRuntimeState({
       status: 'stopped-cleanly',
       stoppedAt: new Date().toISOString()
