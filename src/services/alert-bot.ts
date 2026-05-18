@@ -3,6 +3,7 @@ import fs from 'fs/promises'
 import path from 'path'
 import { AlertBotConnection } from '../types'
 import { readLogTail } from './logger'
+import QRCode from 'qrcode'
 
 interface StatusProvider {
   (): Promise<string> | string
@@ -27,6 +28,7 @@ export class AlertBotService {
   private readonly statusProvider: StatusProvider
   private readonly subscribers = new Set<string>()
   private readonly enabled: boolean
+  private lastQR: string | null = null
 
   constructor(options: AlertBotOptions) {
     this.token = options.token?.trim()
@@ -128,6 +130,15 @@ export class AlertBotService {
 
     if (this.matches(text, ['ayuda', 'help'])) {
       await this.renderDashboard(chatId, 'help')
+      return
+    }
+
+    if (this.matches(text, ['qr', 'codigo qr', 'escanear'])) {
+      if (this.lastQR) {
+        await this.sendQRPhoto(chatId)
+      } else {
+        await this.reply(chatId, '⚠️ No hay código QR disponible en este momento.\n\nEl QR se enviará automáticamente cuando WhatsApp lo genere durante el login.')
+      }
       return
     }
 
@@ -397,5 +408,43 @@ export class AlertBotService {
 
   private isSubscribed(chatId: number): boolean {
     return this.subscribers.has(chatId.toString())
+  }
+
+  async sendQRPhoto(chatIdTarget?: number): Promise<void> {
+    if (!this.bot || !this.lastQR) {
+      return
+    }
+
+    try {
+      // Generar QR como imagen PNG
+      const qrBuffer = await QRCode.toBuffer(this.lastQR, {
+        errorCorrectionLevel: 'H',
+        type: 'png',
+        width: 300,
+        margin: 2
+      })
+
+      const caption = '<b>📱 Código QR de WhatsApp</b>\n\nEscanea este código con tu teléfono WhatsApp para autenticar la sesión.'
+
+      if (chatIdTarget) {
+        // Enviar a un chat específico
+        await this.bot.sendPhoto(chatIdTarget, qrBuffer, { caption, parse_mode: 'HTML' })
+      } else {
+        // Enviar a todos los suscriptores
+        for (const chatId of this.subscribers) {
+          try {
+            await this.bot.sendPhoto(Number(chatId), qrBuffer, { caption, parse_mode: 'HTML' })
+          } catch (error) {
+            console.error(`❌ Error enviando QR a ${chatId}:`, error)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error generando o enviando QR:', error)
+    }
+  }
+
+  storeQR(qr: string): void {
+    this.lastQR = qr
   }
 }

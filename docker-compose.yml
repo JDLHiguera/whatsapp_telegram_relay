@@ -1,9 +1,9 @@
 services:
-  wapi-telegram-bridge:
+  whatsapp-telegram-relay:
     build:
-      context: .
+      context: /mnt/user/appdata/whatsapp_telegram_relay
       dockerfile: Dockerfile
-    container_name: wapi-telegram-bridge
+    container_name: whatsapp-telegram-relay
     restart: unless-stopped
     init: true
     stop_grace_period: 30s
@@ -12,7 +12,7 @@ services:
     environment:
       NODE_ENV: production
     volumes:
-      - ./auth_info:/app/auth_info
-      - ./data:/app/data
+      - /mnt/user/appdata/whatsapp_telegram_relay/auth_info:/app/auth_info
+      - /mnt/user/appdata/whatsapp_telegram_relay/data:/app/data
     stdin_open: true
     tty: true

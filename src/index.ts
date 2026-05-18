@@ -57,6 +57,12 @@ async function main(): Promise<void> {
       void alertBot?.notify('WhatsApp conectado', 'La sesión de WhatsApp quedó activa y lista para relay.', 'info')
     })
 
+    baileys.on('qr', (qr: string) => {
+      console.log('📱 Nuevo código QR generado, enviando a suscriptores...')
+      alertBot?.storeQR(qr)
+      void alertBot?.sendQRPhoto()
+    })
+
     baileys.on('reconnecting', () => {
       void alertBot?.notify('WhatsApp reconectando', 'Se detectó una reconexión automática del servicio de WhatsApp.', 'warning')
     })
