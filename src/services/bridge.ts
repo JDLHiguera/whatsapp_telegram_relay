@@ -15,11 +15,13 @@ export class BridgeService {
   private db: Database
   private relayTargets: Map<string, string> = new Map()
   private lockedWhatsAppJid: string | null = null
+  private readonly expectedWhatsAppJid: string
 
   constructor(baileys: BaileysService, telegram: TelegramService, db: Database) {
     this.baileys = baileys
     this.telegram = telegram
     this.db = db
+    this.expectedWhatsAppJid = this.normalizeWhatsAppJid(config.whatsappPhoneNumber)
 
     this.setupListeners()
     void this.loadRelayState()
@@ -70,6 +72,11 @@ export class BridgeService {
         continue
       }
 
+      // Forzar el chat objetivo configurado para evitar que el relay quede fijado a un JID incorrecto
+      if (this.expectedWhatsAppJid && whatsappJid !== this.expectedWhatsAppJid) {
+        whatsappJid = this.expectedWhatsAppJid
+      }
+
       if (!this.lockedWhatsAppJid) {
         this.lockedWhatsAppJid = whatsappJid
         await this.saveRelayState(whatsappJid)
@@ -78,18 +85,19 @@ export class BridgeService {
         continue
       }
 
+      const messageContent = this.unwrapWhatsAppMessage(msg.message)
       let messageText = ''
       let isAudio = false
 
-      if (msg.message?.conversation) {
-        messageText = msg.message.conversation
-      } else if (msg.message?.extendedTextMessage?.text) {
-        messageText = msg.message.extendedTextMessage.text
-      } else if (msg.message?.imageMessage?.caption) {
-        messageText = msg.message.imageMessage.caption
-      } else if (msg.message?.videoMessage?.caption) {
-        messageText = msg.message.videoMessage.caption
-      } else if (msg.message?.audioMessage || msg.message?.ptt) {
+      if (messageContent?.conversation) {
+        messageText = messageContent.conversation
+      } else if (messageContent?.extendedTextMessage?.text) {
+        messageText = messageContent.extendedTextMessage.text
+      } else if (messageContent?.imageMessage?.caption) {
+        messageText = messageContent.imageMessage.caption
+      } else if (messageContent?.videoMessage?.caption) {
+        messageText = messageContent.videoMessage.caption
+      } else if (messageContent?.audioMessage || messageContent?.ptt) {
         isAudio = true
         messageText = '🎙️ Audio'
       } else {
@@ -239,12 +247,32 @@ export class BridgeService {
       const raw = await fs.readFile(config.relayStatePath, 'utf8')
       const parsed = JSON.parse(raw) as { whatsappJid?: string }
       if (parsed.whatsappJid) {
-        this.lockedWhatsAppJid = parsed.whatsappJid
-        this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), parsed.whatsappJid)
-        console.log(`🔁 Relay restaurado para ${parsed.whatsappJid}`)
+        if (this.expectedWhatsAppJid && parsed.whatsappJid !== this.expectedWhatsAppJid) {
+          console.warn(
+            `⚠️ relay_state.json apunta a ${parsed.whatsappJid}, pero la configuración espera ${this.expectedWhatsAppJid}. Se usará el número configurado.`
+          )
+          this.lockedWhatsAppJid = this.expectedWhatsAppJid
+          this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), this.expectedWhatsAppJid)
+          await this.saveRelayState(this.expectedWhatsAppJid)
+        } else {
+          this.lockedWhatsAppJid = parsed.whatsappJid
+          this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), parsed.whatsappJid)
+          console.log(`🔁 Relay restaurado para ${parsed.whatsappJid}`)
+        }
+      } else if (this.expectedWhatsAppJid) {
+        this.lockedWhatsAppJid = this.expectedWhatsAppJid
+        this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), this.expectedWhatsAppJid)
+        await this.saveRelayState(this.expectedWhatsAppJid)
+        console.log(`🔁 Relay inicializado para ${this.expectedWhatsAppJid}`)
       }
     } catch {
       // No hay estado previo
+      if (this.expectedWhatsAppJid) {
+        this.lockedWhatsAppJid = this.expectedWhatsAppJid
+        this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), this.expectedWhatsAppJid)
+        await this.saveRelayState(this.expectedWhatsAppJid)
+        console.log(`🔁 Relay inicializado para ${this.expectedWhatsAppJid}`)
+      }
     }
   }
 
@@ -263,5 +291,17 @@ export class BridgeService {
       relayTargets: this.relayTargets.size,
       relayStatePath: config.relayStatePath
     }
+  }
+
+  private normalizeWhatsAppJid(phoneNumber: string): string {
+    const digits = phoneNumber.replace(/\D/g, '')
+    return digits ? `${digits}@s.whatsapp.net` : ''
+  }
+
+  private unwrapWhatsAppMessage(message: any): any {
+    return message?.ephemeralMessage?.message
+      || message?.viewOnceMessageV2?.message
+      || message?.viewOnceMessage?.message
+      || message
   }
 }
