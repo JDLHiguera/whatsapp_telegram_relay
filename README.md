@@ -113,6 +113,53 @@ RUNTIME_STATE_PATH=./data/runtime_state.json
 
 No hay comandos de bot propios en este modo; Telegram se usa como cliente de usuario para hablar con el bot externo.
 
+## 🤖 Bot de Alertas y Sincronización WhatsApp
+
+El sistema incluye un bot de Telegram secundario que:
+
+- **Monitorea conexiones**: Notifica desconexiones, reconexiones y caídas inesperadas
+- **Envía QR de sincronización**: Cuando se necesita autenticar WhatsApp, el bot envía automáticamente el código QR como imagen para que lo escanees directamente en Telegram
+- **Panel de estado**: `/start` abre un dashboard interactivo con botones para ver logs, estado de conexiones y gestionar alertas
+- **Historiall de logs**: Ver los últimos eventos del sistema
+
+### Configuración del Bot de Alertas
+
+En `.env`, agrega estas variables:
+
+```env
+# Token del bot de alertas (crea un bot con @BotFather)
+TELEGRAM_ALERT_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+
+# Ruta para guardar IDs de suscriptores
+TELEGRAM_ALERT_SUBSCRIBERS_PATH=./data/alert_subscribers.json
+
+# Archivos de logs y estado
+LOG_FILE_PATH=./data/server.log
+RUNTIME_STATE_PATH=./data/runtime_state.json
+```
+
+### Comandos del Bot de Alertas
+
+Escribe en el chat del bot:
+
+| Comando | Descripción |
+|---------|-------------|
+| `/start`, `/menu`, `/panel` | Abre el dashboard |
+| `Estado`, `Status` | Ver estado de conexiones |
+| `Logs` | Ver últimos eventos |
+| **QR**, `Código QR`, `Escanear` | Ver el código QR actual (si está disponible) |
+| `Suscribirme`, `Alertas on` | Activar notificaciones |
+| `Desuscribirme`, `Alertas off` | Desactivar notificaciones |
+| `Ayuda` | Ver instrucciones |
+
+### Características principales
+
+- ✅ **QR automático en Telegram**: El código QR se envía como foto cuando se necesita autenticar
+- ✅ **Botón de QR manual**: Usa `/qr` si quieres sincronizar de nuevo
+- ✅ **Detecta arranques inesperados**: Sabe si el sistema cayó sin un cierre limpio
+- ✅ **Gracias limpio**: Maneja SIGINT, SIGTERM, excepciones no capturadas
+- ✅ **Dashboard interactivo**: Acceso a todo desde botones inline
+
 ## 🗄️ Base de Datos
 
 Se usa SQLite para almacenar logs de mensajes intercambiados. La relación activa del relay se mantiene en memoria y en `./data/relay_state.json`.
