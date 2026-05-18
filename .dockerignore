@@ -1,0 +1,11 @@
+node_modules
+dist
+data
+auth_info
+.git
+.gitignore
+.env
+.env.local
+*.log
+Dockerfile
+docker-compose.yml
