@@ -1,0 +1,39 @@
+{
+  "name": "wapi-telegram-bridge",
+  "version": "1.0.0",
+  "description": "Bridge between WhatsApp (Baileys) and Telegram",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts",
+    "build": "tsc",
+    "clean": "rimraf dist"
+  },
+  "keywords": [
+    "whatsapp",
+    "telegram",
+    "baileys",
+    "bot"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@types/node-telegram-bot-api": "^0.64.14",
+    "@whiskeysockets/baileys": "^7.0.0-rc.11",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.67.0",
+    "qrcode-terminal": "^0.12.0",
+    "sqlite3": "^5.1.6",
+    "telegram": "^2.26.22"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.0",
+    "rimraf": "^5.0.5",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}

@@ -1,0 +1,18 @@
+services:
+  wapi-telegram-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: wapi-telegram-bridge
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+    volumes:
+      - ./auth_info:/app/auth_info
+      - ./data:/app/data
+    stdin_open: true
+    tty: true
