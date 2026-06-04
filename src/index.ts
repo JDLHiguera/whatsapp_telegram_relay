@@ -52,6 +52,7 @@ async function main(): Promise<void> {
       token: config.alertBotToken,
       adminChatId: config.alertBotAdminChatId,
       relayResetHandler: () => bridge.resetRelayState(),
+      whatsappReconnectHandler: () => baileys.resetAuthAndReconnect(),
       subscribersPath: config.alertBotSubscribersPath,
       logFilePath: config.logFilePath,
       statusProvider: buildStatusSnapshot
@@ -91,6 +92,13 @@ async function main(): Promise<void> {
         : 'WhatsApp se desconectó y necesita re-autenticación.'
 
       if (!info?.shouldReconnect) {
+        if (info?.authExpired) {
+          void alertBot?.notifyWhatsAppAuthRequired(
+            'Baileys recibio un 401 Unauthorized. La sesion local de WhatsApp parece caducada o revocada.'
+          )
+          return
+        }
+
         void alertBot?.notify('WhatsApp desconectado', message, 'error')
         return
       }
@@ -220,7 +228,7 @@ function buildStatusSnapshot(): string {
   const alertStatus = alertBot?.getStatus()
 
   const lines = [
-    `WhatsApp: ${baileysStatus?.isConnected ? 'conectado' : 'desconectado'}`,
+    `WhatsApp: ${baileysStatus?.isConnected ? 'conectado' : baileysStatus?.isConnecting ? 'conectando' : 'desconectado'}`,
     `Telegram: ${telegramStatus?.isConnected ? 'conectado' : 'desconectado'}`,
     `Relay: ${bridgeStatus?.lockedWhatsAppJid || 'sin chat fijado'}`,
     `Alertas: ${alertStatus?.isEnabled ? `activas (${alertStatus.subscriberCount} suscriptores)` : 'desactivadas'}`,

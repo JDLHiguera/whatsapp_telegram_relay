@@ -43,6 +43,7 @@ export interface Config {
 export interface BaileyConnection {
   isConnected: boolean
   isAuthenticated: boolean
+  isConnecting?: boolean
   lastUpdate?: Date
 }
 

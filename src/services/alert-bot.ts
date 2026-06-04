@@ -13,13 +13,13 @@ interface AlertBotOptions {
   token?: string
   adminChatId?: number
   relayResetHandler?: () => Promise<void> | void
+  whatsappReconnectHandler?: () => Promise<void> | void
   subscribersPath: string
   logFilePath: string
   statusProvider: StatusProvider
 }
 
 type AlertLevel = 'info' | 'warning' | 'error'
-
 type DashboardSection = 'main' | 'status' | 'logs' | 'help'
 
 export class AlertBotService {
@@ -27,6 +27,7 @@ export class AlertBotService {
   private readonly token?: string
   private readonly adminChatId?: number
   private readonly relayResetHandler?: () => Promise<void> | void
+  private readonly whatsappReconnectHandler?: () => Promise<void> | void
   private readonly subscribersPath: string
   private readonly logFilePath: string
   private readonly statusProvider: StatusProvider
@@ -38,6 +39,7 @@ export class AlertBotService {
     this.token = options.token?.trim()
     this.adminChatId = options.adminChatId
     this.relayResetHandler = options.relayResetHandler
+    this.whatsappReconnectHandler = options.whatsappReconnectHandler
     this.subscribersPath = options.subscribersPath
     this.logFilePath = options.logFilePath
     this.statusProvider = options.statusProvider
@@ -48,14 +50,14 @@ export class AlertBotService {
     await this.loadSubscribers()
 
     if (!this.enabled || !this.token) {
-      console.log('ℹ️ Bot de alertas desactivado: falta TELEGRAM_ALERT_BOT_TOKEN')
+      console.log('Bot de alertas desactivado: falta TELEGRAM_ALERT_BOT_TOKEN')
       return
     }
 
     this.bot = new TelegramBot(this.token, { polling: true })
 
     this.bot.on('polling_error', (error) => {
-      console.error('❌ Error de polling del bot de alertas:', error)
+      console.error('Error de polling del bot de alertas:', error)
     })
 
     this.bot.on('callback_query', async (query) => {
@@ -67,7 +69,7 @@ export class AlertBotService {
     })
 
     await this.sendWelcomeToSubscribers()
-    console.log(`✅ Bot de alertas conectado. Suscriptores: ${this.subscribers.size}`)
+    console.log(`Bot de alertas conectado. Suscriptores: ${this.subscribers.size}`)
   }
 
   getStatus(): AlertBotConnection {
@@ -85,10 +87,33 @@ export class AlertBotService {
       return
     }
 
-    const emoji = level === 'error' ? '🚨' : level === 'warning' ? '⚠️' : 'ℹ️'
-    const text = `<b>${emoji} ${this.escapeHtml(title)}</b>\n\n${this.escapeHtml(body)}`
-
+    const label = level === 'error' ? 'ERROR' : level === 'warning' ? 'AVISO' : 'INFO'
+    const text = `<b>${label}: ${this.escapeHtml(title)}</b>\n\n${this.escapeHtml(body)}`
     await this.broadcast(text, { parse_mode: 'HTML' })
+  }
+
+  async notifyWhatsAppAuthRequired(body: string): Promise<void> {
+    if (!this.bot || this.subscribers.size === 0) {
+      return
+    }
+
+    const text = [
+      '<b>WhatsApp necesita reautenticacion</b>',
+      '',
+      this.escapeHtml(body),
+      '',
+      'Pulsa "Reconectar WhatsApp" para borrar la sesion local y generar un QR nuevo.'
+    ].join('\n')
+
+    await this.broadcast(text, {
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }],
+          [{ text: 'Abrir panel', callback_data: 'dashboard:main' }]
+        ]
+      }
+    })
   }
 
   async shutdown(): Promise<void> {
@@ -124,13 +149,13 @@ export class AlertBotService {
 
     if (this.matches(text, ['suscribirme', 'alertas on', 'activar alertas'])) {
       await this.subscribe(chatId)
-      await this.renderDashboard(chatId, 'main', '✅ Alertas activadas para este chat.')
+      await this.renderDashboard(chatId, 'main', 'Alertas activadas para este chat.')
       return
     }
 
     if (this.matches(text, ['desuscribirme', 'alertas off', 'desactivar alertas'])) {
       await this.unsubscribe(chatId)
-      await this.reply(chatId, '✅ Alertas desactivadas para este chat.')
+      await this.reply(chatId, 'Alertas desactivadas para este chat.')
       return
     }
 
@@ -143,18 +168,23 @@ export class AlertBotService {
       if (this.lastQR) {
         await this.sendQRPhoto(chatId)
       } else {
-        await this.reply(chatId, '⚠️ No hay código QR disponible en este momento.\n\nEl QR se enviará automáticamente cuando WhatsApp lo genere durante el login.')
+        await this.reply(chatId, 'No hay codigo QR disponible ahora. Usa "Reconectar WhatsApp" si la sesion caduco.')
       }
+      return
+    }
+
+    if (this.matches(text, ['reconectar whatsapp', 'reconnect whatsapp', 'whatsapp qr', 'reauth whatsapp', 'reautenticar whatsapp'])) {
+      await this.handleWhatsAppReconnect(chatId)
       return
     }
 
     if (this.matches(text, ['refrescar', 'refresh'])) {
       await this.renderDashboard(chatId, 'main')
+      return
     }
 
     if (this.matches(text, ['resetrelay', 'reset relay', 'reiniciar relay', 'limpiar relay'])) {
       await this.handleRelayReset(chatId)
-      return
     }
   }
 
@@ -191,13 +221,13 @@ export class AlertBotService {
 
     if (data === 'alerts:on') {
       await this.subscribe(chatId)
-      await this.renderDashboard(chatId, 'main', '✅ Alertas activadas.', query.message?.message_id)
+      await this.renderDashboard(chatId, 'main', 'Alertas activadas.', query.message?.message_id)
       return
     }
 
     if (data === 'alerts:off') {
       await this.unsubscribe(chatId)
-      await this.reply(chatId, '✅ Alertas desactivadas para este chat.')
+      await this.reply(chatId, 'Alertas desactivadas para este chat.')
       return
     }
 
@@ -208,6 +238,11 @@ export class AlertBotService {
 
     if (data === 'relay:reset') {
       await this.handleRelayReset(chatId, query.message?.message_id)
+      return
+    }
+
+    if (data === 'whatsapp:reconnect') {
+      await this.handleWhatsAppReconnect(chatId, query.message?.message_id)
     }
   }
 
@@ -230,7 +265,7 @@ export class AlertBotService {
         })
         return
       } catch {
-        // Si editar falla, seguimos con un mensaje nuevo
+        // Si editar falla, enviamos un mensaje nuevo.
       }
     }
 
@@ -242,13 +277,13 @@ export class AlertBotService {
 
   private async buildDashboardText(chatId: number, section: DashboardSection, notice?: string): Promise<string> {
     const status = await this.statusProvider()
-    const heading = '🧭 <b>WAPI Control Center</b>'
-    const subtitle = 'Panel de alertas, estado y logs en un solo lugar.'
+    const heading = '<b>WAPI Control Center</b>'
+    const subtitle = 'Panel de alertas, estado y logs.'
     const noticeBlock = notice ? `\n\n${this.escapeHtml(notice)}` : ''
     const chatAlertsEnabled = this.isSubscribed(chatId)
     const chatAlertsLine = chatAlertsEnabled
-      ? '🟢 <b>Alertas en este chat</b>: activadas'
-      : '⚪ <b>Alertas en este chat</b>: desactivadas'
+      ? '<b>Alertas en este chat</b>: activadas'
+      : '<b>Alertas en este chat</b>: desactivadas'
 
     if (section === 'status') {
       return [
@@ -258,7 +293,7 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '📊 <b>Estado actual</b>',
+        '<b>Estado actual</b>',
         `<pre>${this.escapeHtml(status)}</pre>`
       ].join('\n')
     }
@@ -272,7 +307,7 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '🧾 <b>Últimos logs del servidor</b>',
+        '<b>Ultimos logs del servidor</b>',
         `<pre>${this.escapeHtml(logs)}</pre>`
       ].join('\n')
     }
@@ -285,11 +320,12 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '📝 <b>Qué puedes hacer aquí</b>',
-        '• Ver estado del relay y de las conexiones',
-        '• Revisar los últimos logs del servidor',
-        '• Activar o desactivar alertas',
-        '• Recibir avisos si WhatsApp o Telegram caen'
+        '<b>Que puedes hacer aqui</b>',
+        '- Ver estado del relay y de las conexiones',
+        '- Revisar los ultimos logs del servidor',
+        '- Activar o desactivar alertas',
+        '- Recibir avisos si WhatsApp o Telegram caen',
+        '- Reautenticar WhatsApp y recibir el QR en Telegram'
       ].join('\n')
     }
 
@@ -299,7 +335,7 @@ export class AlertBotService {
       noticeBlock,
       '',
       chatAlertsLine,
-      `👥 <b>Suscriptores</b>: ${this.subscribers.size}`,
+      `<b>Suscriptores</b>: ${this.subscribers.size}`,
       '',
       this.formatStatusSummary(status)
     ].join('\n')
@@ -311,20 +347,23 @@ export class AlertBotService {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: section === 'main' ? '• Inicio' : 'Inicio', callback_data: 'dashboard:main' },
+            { text: section === 'main' ? '* Inicio' : 'Inicio', callback_data: 'dashboard:main' },
             { text: 'Estado', callback_data: 'dashboard:status' },
             { text: 'Logs', callback_data: 'dashboard:logs' }
           ],
           [
-            { text: subscribed ? '✅ Alertas activas' : 'Activar alertas', callback_data: 'alerts:on' },
-            { text: subscribed ? 'Desactivar alertas' : '⚪ Alertas apagadas', callback_data: 'alerts:off' }
+            { text: subscribed ? 'Alertas activas' : 'Activar alertas', callback_data: 'alerts:on' },
+            { text: subscribed ? 'Desactivar alertas' : 'Alertas apagadas', callback_data: 'alerts:off' }
+          ],
+          [
+            { text: 'Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }
           ],
           [
             { text: 'Refrescar', callback_data: 'dashboard:refresh' },
             { text: 'Ayuda', callback_data: 'dashboard:help' }
           ],
           [
-            { text: '🧹 Reset relay', callback_data: 'relay:reset' }
+            { text: 'Reset relay', callback_data: 'relay:reset' }
           ]
         ]
       }
@@ -333,10 +372,14 @@ export class AlertBotService {
 
   private formatStatusSummary(status: string): string {
     const normalized = status.toLowerCase()
-    const whatsapp = normalized.includes('whatsapp: conectado') ? '🟢 WhatsApp conectado' : '🔴 WhatsApp desconectado'
-    const telegram = normalized.includes('telegram: conectado') ? '🟢 Telegram conectado' : '🔴 Telegram desconectado'
-    const relay = normalized.includes('relay: sin chat fijado') ? '🟠 Relay sin chat fijo' : '🟢 Relay con chat fijado'
-    const alerts = normalized.includes('alertas: activas') ? '🟢 Alertas activas' : '⚪ Alertas desactivadas'
+    const whatsapp = normalized.includes('whatsapp: conectado')
+      ? 'WhatsApp conectado'
+      : normalized.includes('whatsapp: conectando')
+        ? 'WhatsApp conectando'
+        : 'WhatsApp desconectado'
+    const telegram = normalized.includes('telegram: conectado') ? 'Telegram conectado' : 'Telegram desconectado'
+    const relay = normalized.includes('relay: sin chat fijado') ? 'Relay sin chat fijo' : 'Relay con chat fijado'
+    const alerts = normalized.includes('alertas: activas') ? 'Alertas activas' : 'Alertas desactivadas'
 
     return [whatsapp, telegram, relay, alerts].join('\n')
   }
@@ -347,7 +390,7 @@ export class AlertBotService {
     }
 
     await this.broadcast(
-      '<b>✅ Bot de alertas activo</b>\n\nAbre <code>/start</code> para ver el panel o usa los botones inline.',
+      '<b>Bot de alertas activo</b>\n\nAbre <code>/start</code> para ver el panel o usa los botones inline.',
       { parse_mode: 'HTML' }
     )
   }
@@ -357,7 +400,7 @@ export class AlertBotService {
     if (!this.subscribers.has(key)) {
       this.subscribers.add(key)
       await this.saveSubscribers()
-      console.info(`🔔 Alertas activadas para el chat ${chatId}`)
+      console.info(`Alertas activadas para el chat ${chatId}`)
     }
   }
 
@@ -365,7 +408,7 @@ export class AlertBotService {
     const key = chatId.toString()
     if (this.subscribers.delete(key)) {
       await this.saveSubscribers()
-      console.info(`🔕 Alertas desactivadas para el chat ${chatId}`)
+      console.info(`Alertas desactivadas para el chat ${chatId}`)
     }
   }
 
@@ -378,7 +421,7 @@ export class AlertBotService {
       try {
         await this.bot.sendMessage(Number(chatId), text, options)
       } catch (error) {
-        console.error(`❌ Error enviando alerta a ${chatId}:`, error)
+        console.error(`Error enviando alerta a ${chatId}:`, error)
       }
     }
   }
@@ -412,7 +455,7 @@ export class AlertBotService {
         this.subscribers.add(subscriber)
       }
     } catch {
-      // Sin suscriptores todavía
+      // Sin suscriptores todavia.
     }
   }
 
@@ -427,17 +470,36 @@ export class AlertBotService {
 
   private async handleRelayReset(chatId: number, messageId?: number): Promise<void> {
     if (this.adminChatId && chatId !== this.adminChatId) {
-      await this.reply(chatId, '⚠️ Este comando solo está permitido desde el chat admin configurado.')
+      await this.reply(chatId, 'Este comando solo esta permitido desde el chat admin configurado.')
       return
     }
 
     if (!this.relayResetHandler) {
-      await this.reply(chatId, '⚠️ No hay handler de reseteo configurado en la aplicación.')
+      await this.reply(chatId, 'No hay handler de reseteo configurado en la aplicacion.')
       return
     }
 
     await this.relayResetHandler()
-    await this.renderDashboard(chatId, 'main', '🧹 Relay reseteado. El próximo mensaje de WhatsApp volverá a fijar el chat.', messageId)
+    await this.renderDashboard(chatId, 'main', 'Relay reseteado. El proximo mensaje de WhatsApp volvera a fijar el chat.', messageId)
+  }
+
+  private async handleWhatsAppReconnect(chatId: number, messageId?: number): Promise<void> {
+    if (this.adminChatId && chatId !== this.adminChatId) {
+      await this.reply(chatId, 'Este comando solo esta permitido desde el chat admin configurado.')
+      return
+    }
+
+    if (!this.whatsappReconnectHandler) {
+      await this.reply(chatId, 'No hay handler de reconexion de WhatsApp configurado.')
+      return
+    }
+
+    this.lastQR = null
+    await this.renderDashboard(chatId, 'main', 'Reiniciando WhatsApp. Te enviare el QR cuando Baileys lo genere.', messageId)
+    void Promise.resolve(this.whatsappReconnectHandler()).catch(async (error) => {
+      console.error('Error reiniciando WhatsApp:', error)
+      await this.reply(chatId, `Error reiniciando WhatsApp: ${String(error)}`)
+    })
   }
 
   private isSubscribed(chatId: number): boolean {
@@ -450,7 +512,6 @@ export class AlertBotService {
     }
 
     try {
-      // Generar QR como imagen PNG
       const qrBuffer = await QRCode.toBuffer(this.lastQR, {
         errorCorrectionLevel: 'H',
         type: 'png',
@@ -458,29 +519,26 @@ export class AlertBotService {
         margin: 2
       })
 
-      const caption = '<b>📱 Código QR de WhatsApp</b>\n\nEscanea este código con tu teléfono WhatsApp para autenticar la sesión.'
+      const caption = '<b>Codigo QR de WhatsApp</b>\n\nEscanea este codigo con tu telefono para autenticar la sesion.'
 
       if (chatIdTarget) {
-        // Enviar a un chat específico
         await this.bot.sendPhoto(chatIdTarget, qrBuffer, { caption, parse_mode: 'HTML' })
       } else if (this.adminChatId) {
-        // Enviar al admin chat si está configurado
         await this.bot.sendPhoto(this.adminChatId, qrBuffer, { caption, parse_mode: 'HTML' })
-        console.log(`📸 QR enviado al chat admin: ${this.adminChatId}`)
+        console.log(`QR enviado al chat admin: ${this.adminChatId}`)
       } else if (this.subscribers.size > 0) {
-        // Enviar a todos los suscriptores
         for (const chatId of this.subscribers) {
           try {
             await this.bot.sendPhoto(Number(chatId), qrBuffer, { caption, parse_mode: 'HTML' })
           } catch (error) {
-            console.error(`❌ Error enviando QR a ${chatId}:`, error)
+            console.error(`Error enviando QR a ${chatId}:`, error)
           }
         }
       } else {
-        console.warn('⚠️ No hay admin chat ni suscriptores para enviar el QR')
+        console.warn('No hay admin chat ni suscriptores para enviar el QR')
       }
     } catch (error) {
-      console.error('❌ Error generando o enviando QR:', error)
+      console.error('Error generando o enviando QR:', error)
     }
   }
 
