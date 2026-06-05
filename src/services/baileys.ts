@@ -16,6 +16,7 @@ export class BaileysService extends EventEmitter {
   private isConnecting = false
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private suppressNextClose = false
+  private saveCredsPromise: Promise<void> = Promise.resolve()
   private readonly authPath = path.join(__dirname, '../../auth_info')
 
   constructor() {
@@ -80,13 +81,23 @@ export class BaileysService extends EventEmitter {
           }
 
           const error = lastDisconnect?.error
-          const shouldReconnect =
-            (error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut
+          const statusCode = this.getDisconnectStatusCode(error)
+          const restartRequired = statusCode === DisconnectReason.restartRequired
+          const shouldReconnect = statusCode !== DisconnectReason.loggedOut
           const authExpired = this.isAuthExpiredError(error)
 
           console.log('Desconectado de WhatsApp:', error)
           this.isConnected = false
           this.isConnecting = false
+          if (this.sock === sock) {
+            this.sock = null
+          }
+
+          if (restartRequired) {
+            console.log('WhatsApp pidio reiniciar el stream despues del QR. Reconectando...')
+            this.scheduleReconnect(750)
+            return
+          }
 
           this.emit('disconnected', {
             error,
@@ -96,10 +107,7 @@ export class BaileysService extends EventEmitter {
 
           if (shouldReconnect) {
             console.log('Reconectando...')
-            this.reconnectTimer = setTimeout(() => {
-              this.reconnectTimer = null
-              void this.connect()
-            }, 3000)
+            this.scheduleReconnect(3000)
           } else {
             console.log('Sesion cerrada. Hay que autenticar WhatsApp de nuevo.')
             this.isAuthenticated = false
@@ -108,7 +116,11 @@ export class BaileysService extends EventEmitter {
         }
       })
 
-      sock.ev.on('creds.update', saveCreds)
+      sock.ev.on('creds.update', () => {
+        this.saveCredsPromise = Promise.resolve(saveCreds()).catch((error) => {
+          console.error('Error guardando credenciales de WhatsApp:', error)
+        })
+      })
 
       sock.ev.on('messages.upsert', async (m: any) => {
         this.emit('message', m)
@@ -231,9 +243,29 @@ export class BaileysService extends EventEmitter {
   }
 
   private isAuthExpiredError(error: any): boolean {
-    const statusCode = error?.output?.statusCode
+    const statusCode = this.getDisconnectStatusCode(error)
     const reason = String(error?.data?.reason || '').toLowerCase()
     return statusCode === 401 || reason === '401'
+  }
+
+  private getDisconnectStatusCode(error: any): number | undefined {
+    return error?.output?.statusCode
+  }
+
+  private scheduleReconnect(delayMs: number): void {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+    }
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      void this.reconnectAfterCredsSaved()
+    }, delayMs)
+  }
+
+  private async reconnectAfterCredsSaved(): Promise<void> {
+    await this.saveCredsPromise.catch(() => undefined)
+    await this.connect()
   }
 
   private async clearAuthDirectory(): Promise<void> {
