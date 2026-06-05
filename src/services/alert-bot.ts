@@ -22,6 +22,17 @@ interface AlertBotOptions {
 type AlertLevel = 'info' | 'warning' | 'error'
 type DashboardSection = 'main' | 'status' | 'logs' | 'help'
 
+const REPLY_KEYBOARD = {
+  keyboard: [
+    [{ text: '🧭 Panel' }, { text: '📊 Estado' }],
+    [{ text: '🧾 Logs' }, { text: '🔄 Reconectar WhatsApp' }],
+    [{ text: '📱 QR' }, { text: '🧹 Reset relay' }],
+    [{ text: '❓ Ayuda' }]
+  ],
+  resize_keyboard: true,
+  is_persistent: true
+}
+
 export class AlertBotService {
   private bot: TelegramBot | null = null
   private readonly token?: string
@@ -68,6 +79,7 @@ export class AlertBotService {
       await this.handleMessage(message)
     })
 
+    await this.setupTelegramMenu()
     await this.sendWelcomeToSubscribers()
     console.log(`Bot de alertas conectado. Suscriptores: ${this.subscribers.size}`)
   }
@@ -87,7 +99,7 @@ export class AlertBotService {
       return
     }
 
-    const label = level === 'error' ? 'ERROR' : level === 'warning' ? 'AVISO' : 'INFO'
+    const label = level === 'error' ? '🚨 ERROR' : level === 'warning' ? '⚠️ AVISO' : 'ℹ️ INFO'
     const text = `<b>${label}: ${this.escapeHtml(title)}</b>\n\n${this.escapeHtml(body)}`
     await this.broadcast(text, { parse_mode: 'HTML' })
   }
@@ -98,19 +110,19 @@ export class AlertBotService {
     }
 
     const text = [
-      '<b>WhatsApp necesita reautenticacion</b>',
+      '<b>🔐 WhatsApp necesita reautenticacion</b>',
       '',
       this.escapeHtml(body),
       '',
-      'Pulsa "Reconectar WhatsApp" para borrar la sesion local y generar un QR nuevo.'
+      'Pulsa "🔄 Reconectar WhatsApp" para borrar la sesion local y generar un QR nuevo.'
     ].join('\n')
 
     await this.broadcast(text, {
       parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [
-          [{ text: 'Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }],
-          [{ text: 'Abrir panel', callback_data: 'dashboard:main' }]
+          [{ text: '🔄 Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }],
+          [{ text: '🧭 Abrir panel', callback_data: 'dashboard:main' }]
         ]
       }
     })
@@ -129,10 +141,11 @@ export class AlertBotService {
     }
 
     const chatId = message.chat.id
-    const text = message.text.trim().toLowerCase()
+    const text = this.normalizeCommandText(message.text)
 
-    if (text === '/start' || text === '/menu' || text === '/panel') {
+    if (text === '/start' || text === '/menu' || text === '/panel' || this.matches(text, ['panel', 'menu', 'inicio'])) {
       await this.subscribe(chatId)
+      await this.showReplyKeyboard(chatId)
       await this.renderDashboard(chatId, 'main')
       return
     }
@@ -149,7 +162,8 @@ export class AlertBotService {
 
     if (this.matches(text, ['suscribirme', 'alertas on', 'activar alertas'])) {
       await this.subscribe(chatId)
-      await this.renderDashboard(chatId, 'main', 'Alertas activadas para este chat.')
+      await this.showReplyKeyboard(chatId)
+      await this.renderDashboard(chatId, 'main', '✅ Alertas activadas para este chat.')
       return
     }
 
@@ -168,7 +182,7 @@ export class AlertBotService {
       if (this.lastQR) {
         await this.sendQRPhoto(chatId)
       } else {
-        await this.reply(chatId, 'No hay codigo QR disponible ahora. Usa "Reconectar WhatsApp" si la sesion caduco.')
+        await this.reply(chatId, '⚠️ No hay codigo QR disponible ahora. Usa "🔄 Reconectar WhatsApp" si la sesion caduco.')
       }
       return
     }
@@ -221,7 +235,7 @@ export class AlertBotService {
 
     if (data === 'alerts:on') {
       await this.subscribe(chatId)
-      await this.renderDashboard(chatId, 'main', 'Alertas activadas.', query.message?.message_id)
+      await this.renderDashboard(chatId, 'main', '✅ Alertas activadas.', query.message?.message_id)
       return
     }
 
@@ -277,13 +291,13 @@ export class AlertBotService {
 
   private async buildDashboardText(chatId: number, section: DashboardSection, notice?: string): Promise<string> {
     const status = await this.statusProvider()
-    const heading = '<b>WAPI Control Center</b>'
-    const subtitle = 'Panel de alertas, estado y logs.'
+    const heading = '<b>🧭 WAPI Control Center</b>'
+    const subtitle = 'WhatsApp ↔ Telegram bajo control.'
     const noticeBlock = notice ? `\n\n${this.escapeHtml(notice)}` : ''
     const chatAlertsEnabled = this.isSubscribed(chatId)
     const chatAlertsLine = chatAlertsEnabled
-      ? '<b>Alertas en este chat</b>: activadas'
-      : '<b>Alertas en este chat</b>: desactivadas'
+      ? '🟢 <b>Alertas en este chat</b>: activadas'
+      : '⚪ <b>Alertas en este chat</b>: desactivadas'
 
     if (section === 'status') {
       return [
@@ -293,7 +307,7 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '<b>Estado actual</b>',
+        '📊 <b>Estado actual</b>',
         `<pre>${this.escapeHtml(status)}</pre>`
       ].join('\n')
     }
@@ -307,7 +321,7 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '<b>Ultimos logs del servidor</b>',
+        '🧾 <b>Ultimos logs del servidor</b>',
         `<pre>${this.escapeHtml(logs)}</pre>`
       ].join('\n')
     }
@@ -320,12 +334,14 @@ export class AlertBotService {
         '',
         chatAlertsLine,
         '',
-        '<b>Que puedes hacer aqui</b>',
-        '- Ver estado del relay y de las conexiones',
-        '- Revisar los ultimos logs del servidor',
-        '- Activar o desactivar alertas',
-        '- Recibir avisos si WhatsApp o Telegram caen',
-        '- Reautenticar WhatsApp y recibir el QR en Telegram'
+        '❓ <b>Que puedes hacer aqui</b>',
+        '• Ver estado del relay y de las conexiones',
+        '• Revisar los ultimos logs del servidor',
+        '• Activar o desactivar alertas',
+        '• Recibir avisos si WhatsApp o Telegram caen',
+        '• Reautenticar WhatsApp y recibir el QR en Telegram',
+        '',
+        'Tambien tienes un teclado fijo debajo del chat para no escribir comandos.'
       ].join('\n')
     }
 
@@ -335,7 +351,7 @@ export class AlertBotService {
       noticeBlock,
       '',
       chatAlertsLine,
-      `<b>Suscriptores</b>: ${this.subscribers.size}`,
+      `👥 <b>Suscriptores</b>: ${this.subscribers.size}`,
       '',
       this.formatStatusSummary(status)
     ].join('\n')
@@ -347,23 +363,23 @@ export class AlertBotService {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: section === 'main' ? '* Inicio' : 'Inicio', callback_data: 'dashboard:main' },
-            { text: 'Estado', callback_data: 'dashboard:status' },
-            { text: 'Logs', callback_data: 'dashboard:logs' }
+            { text: section === 'main' ? '• 🧭 Inicio' : '🧭 Inicio', callback_data: 'dashboard:main' },
+            { text: '📊 Estado', callback_data: 'dashboard:status' },
+            { text: '🧾 Logs', callback_data: 'dashboard:logs' }
           ],
           [
-            { text: subscribed ? 'Alertas activas' : 'Activar alertas', callback_data: 'alerts:on' },
-            { text: subscribed ? 'Desactivar alertas' : 'Alertas apagadas', callback_data: 'alerts:off' }
+            { text: subscribed ? '🟢 Alertas activas' : '🔔 Activar alertas', callback_data: 'alerts:on' },
+            { text: subscribed ? '🔕 Desactivar alertas' : '⚪ Alertas apagadas', callback_data: 'alerts:off' }
           ],
           [
-            { text: 'Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }
+            { text: '🔄 Reconectar WhatsApp', callback_data: 'whatsapp:reconnect' }
           ],
           [
-            { text: 'Refrescar', callback_data: 'dashboard:refresh' },
-            { text: 'Ayuda', callback_data: 'dashboard:help' }
+            { text: '♻️ Refrescar', callback_data: 'dashboard:refresh' },
+            { text: '❓ Ayuda', callback_data: 'dashboard:help' }
           ],
           [
-            { text: 'Reset relay', callback_data: 'relay:reset' }
+            { text: '🧹 Reset relay', callback_data: 'relay:reset' }
           ]
         ]
       }
@@ -373,13 +389,13 @@ export class AlertBotService {
   private formatStatusSummary(status: string): string {
     const normalized = status.toLowerCase()
     const whatsapp = normalized.includes('whatsapp: conectado')
-      ? 'WhatsApp conectado'
+      ? '🟢 WhatsApp conectado'
       : normalized.includes('whatsapp: conectando')
-        ? 'WhatsApp conectando'
-        : 'WhatsApp desconectado'
-    const telegram = normalized.includes('telegram: conectado') ? 'Telegram conectado' : 'Telegram desconectado'
-    const relay = normalized.includes('relay: sin chat fijado') ? 'Relay sin chat fijo' : 'Relay con chat fijado'
-    const alerts = normalized.includes('alertas: activas') ? 'Alertas activas' : 'Alertas desactivadas'
+        ? '🟡 WhatsApp conectando'
+        : '🔴 WhatsApp desconectado'
+    const telegram = normalized.includes('telegram: conectado') ? '🟢 Telegram conectado' : '🔴 Telegram desconectado'
+    const relay = normalized.includes('relay: sin chat fijado') ? '🟠 Relay sin chat fijo' : '🟢 Relay con chat fijado'
+    const alerts = normalized.includes('alertas: activas') ? '🟢 Alertas activas' : '⚪ Alertas desactivadas'
 
     return [whatsapp, telegram, relay, alerts].join('\n')
   }
@@ -390,9 +406,37 @@ export class AlertBotService {
     }
 
     await this.broadcast(
-      '<b>Bot de alertas activo</b>\n\nAbre <code>/start</code> para ver el panel o usa los botones inline.',
-      { parse_mode: 'HTML' }
+      '<b>✅ Bot de alertas activo</b>\n\nEl teclado de control ya esta disponible debajo del chat.',
+      {
+        parse_mode: 'HTML',
+        reply_markup: REPLY_KEYBOARD
+      }
     )
+  }
+
+  private async setupTelegramMenu(): Promise<void> {
+    if (!this.bot) {
+      return
+    }
+
+    try {
+      await this.bot.setMyCommands([
+        { command: 'menu', description: 'Abrir panel de control' },
+        { command: 'estado', description: 'Ver estado de conexiones' },
+        { command: 'logs', description: 'Ver ultimos logs' },
+        { command: 'qr', description: 'Ver QR actual de WhatsApp' },
+        { command: 'reconectar_whatsapp', description: 'Reautenticar WhatsApp' },
+        { command: 'resetrelay', description: 'Resetear chat fijado del relay' }
+      ])
+    } catch (error) {
+      console.warn('No se pudieron registrar los comandos de Telegram:', error)
+    }
+  }
+
+  private async showReplyKeyboard(chatId: number): Promise<void> {
+    await this.reply(chatId, '🎛️ Teclado de control activo.', {
+      reply_markup: REPLY_KEYBOARD
+    })
   }
 
   private async subscribe(chatId: number): Promise<void> {
@@ -436,6 +480,15 @@ export class AlertBotService {
 
   private matches(text: string, values: string[]): boolean {
     return values.some((value) => text === value.toLowerCase() || text === `/${value.toLowerCase()}`)
+  }
+
+  private normalizeCommandText(value: string): string {
+    return value
+      .toLowerCase()
+      .replace(/_/g, ' ')
+      .replace(/[^\p{L}\p{N}/\s]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim()
   }
 
   private escapeHtml(value: string): string {
