@@ -145,7 +145,8 @@ export class BaileysService extends EventEmitter {
     }
 
     await this.disconnect().catch(() => undefined)
-    await fs.rm(this.authPath, { recursive: true, force: true })
+    await this.sleep(500)
+    await this.clearAuthDirectory()
 
     this.sock = null
     this.isConnected = false
@@ -233,5 +234,32 @@ export class BaileysService extends EventEmitter {
     const statusCode = error?.output?.statusCode
     const reason = String(error?.data?.reason || '').toLowerCase()
     return statusCode === 401 || reason === '401'
+  }
+
+  private async clearAuthDirectory(): Promise<void> {
+    await fs.mkdir(this.authPath, { recursive: true })
+
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        const entries = await fs.readdir(this.authPath, { withFileTypes: true })
+
+        await Promise.all(entries.map(async (entry) => {
+          const entryPath = path.join(this.authPath, entry.name)
+          await fs.rm(entryPath, { recursive: true, force: true })
+        }))
+
+        return
+      } catch (error: any) {
+        if (!['EBUSY', 'ENOTEMPTY', 'EPERM'].includes(error?.code) || attempt === 5) {
+          throw error
+        }
+
+        await this.sleep(500 * attempt)
+      }
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 }
