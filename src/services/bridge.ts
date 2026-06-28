@@ -15,6 +15,8 @@ export class BridgeService {
   private db: Database
   private relayTargets: Map<string, string> = new Map()
   private lockedWhatsAppJid: string | null = null
+  private typingExpiryTimer: ReturnType<typeof setTimeout> | null = null
+  private typingGeneration = 0
 
   constructor(baileys: BaileysService, telegram: TelegramService, db: Database) {
     this.baileys = baileys
@@ -42,6 +44,19 @@ export class BridgeService {
         await this.handleTelegramMessage(m)
       } catch (error) {
         console.error('❌ Error procesando mensaje de Telegram:', error)
+      }
+    })
+
+    this.telegram.on('typing', (isTyping: boolean) => {
+      const whatsappJid = this.lockedWhatsAppJid
+      if (!whatsappJid) {
+        return
+      }
+
+      if (isTyping) {
+        this.startWhatsAppTyping(whatsappJid)
+      } else {
+        void this.stopWhatsAppTyping(whatsappJid)
       }
     })
   }
@@ -184,6 +199,8 @@ export class BridgeService {
     }
 
     try {
+      await this.stopWhatsAppTyping(whatsappJid)
+
       // Si hay media (imagen, video, documento)
       if (relayEvent.media) {
         console.log('📸 Telegram envió media, descargando...')
@@ -273,7 +290,42 @@ export class BridgeService {
       || message
   }
 
+  private startWhatsAppTyping(jid: string): number {
+    const generation = ++this.typingGeneration
+
+    void this.baileys.sendTyping(jid, true).catch(() => undefined)
+
+    if (this.typingExpiryTimer) {
+      clearTimeout(this.typingExpiryTimer)
+    }
+
+    this.typingExpiryTimer = setTimeout(() => {
+      void this.stopWhatsAppTyping(jid, generation)
+    }, 7000)
+
+    return generation
+  }
+
+  private async stopWhatsAppTyping(jid: string, generation?: number): Promise<void> {
+    if (generation !== undefined && generation !== this.typingGeneration) {
+      return
+    }
+
+    this.typingGeneration++
+
+    if (this.typingExpiryTimer) {
+      clearTimeout(this.typingExpiryTimer)
+      this.typingExpiryTimer = null
+    }
+
+    await this.baileys.sendTyping(jid, false).catch(() => undefined)
+  }
+
   async resetRelayState(): Promise<void> {
+    if (this.lockedWhatsAppJid) {
+      await this.stopWhatsAppTyping(this.lockedWhatsAppJid)
+    }
+
     this.lockedWhatsAppJid = null
     this.relayTargets.clear()
 
