@@ -207,6 +207,19 @@ export class BaileysService extends EventEmitter {
     }
   }
 
+  async sendTyping(jid: string, isTyping: boolean): Promise<void> {
+    if (!this.sock) {
+      throw new Error('WhatsApp no esta conectado')
+    }
+
+    try {
+      await this.sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', jid)
+    } catch (error) {
+      console.error('Error al actualizar el estado de escritura:', error)
+      throw error
+    }
+  }
+
   async checkNumberExists(number: string): Promise<boolean> {
     if (!this.sock) {
       throw new Error('WhatsApp no esta conectado')

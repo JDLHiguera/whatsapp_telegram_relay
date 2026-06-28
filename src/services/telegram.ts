@@ -2,8 +2,8 @@ import { EventEmitter } from 'events'
 import fs from 'fs/promises'
 import path from 'path'
 import readline from 'readline'
-import { TelegramClient } from 'telegram'
-import { NewMessage } from 'telegram/events'
+import { Api, TelegramClient } from 'telegram'
+import { NewMessage, Raw } from 'telegram/events'
 import { StringSession } from 'telegram/sessions'
 import { config } from '../config'
 import { RelayEvent, TelegramConnection } from '../types'
@@ -12,6 +12,7 @@ export class TelegramService extends EventEmitter {
   private client: TelegramClient | null = null
   private isConnected = false
   private relayBotUsername = ''
+  private relayBotUserId = ''
 
   constructor() {
     super()
@@ -53,6 +54,20 @@ export class TelegramService extends EventEmitter {
           await this.handleIncomingTelegramMessage(event)
         },
         new NewMessage({ incoming: true })
+      )
+
+      const relayBot = await this.client.getEntity(this.relayBotUsername)
+      this.relayBotUserId = String((relayBot as any).id)
+
+      this.client.addEventHandler(
+        (update: Api.UpdateUserTyping) => {
+          if (String(update.userId) !== this.relayBotUserId) {
+            return
+          }
+
+          this.emit('typing', update.action instanceof Api.SendMessageTypingAction)
+        },
+        new Raw({ types: [Api.UpdateUserTyping] })
       )
 
       this.isConnected = true
