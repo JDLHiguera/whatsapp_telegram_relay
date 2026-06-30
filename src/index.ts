@@ -13,8 +13,8 @@ let telegram: TelegramService
 let bridge: BridgeService
 let alertBot: AlertBotService | null = null
 let shuttingDown = false
-let whatsappDisconnectTimer: ReturnType<typeof setTimeout> | null = null
-let whatsappDisconnectNotified = false
+let whatsappHasConnected = false
+let whatsappNeedsRecoveryNotice = false
 
 /**
  * Función principal de inicialización
@@ -59,21 +59,20 @@ async function main(): Promise<void> {
     })
 
     baileys.on('connected', () => {
-      if (whatsappDisconnectTimer) {
-        clearTimeout(whatsappDisconnectTimer)
-        whatsappDisconnectTimer = null
+      if (!whatsappHasConnected) {
+        whatsappHasConnected = true
+        void alertBot?.notify('WhatsApp conectado', 'La sesión de WhatsApp quedó activa y lista para relay.', 'info')
+        return
       }
 
-      if (whatsappDisconnectNotified) {
-        whatsappDisconnectNotified = false
+      if (whatsappNeedsRecoveryNotice) {
+        whatsappNeedsRecoveryNotice = false
         void alertBot?.notify(
           'WhatsApp reconectado',
-          'La desconexión fue temporal y la sesión volvió a quedar activa.',
+          'La sesión volvió a quedar activa después de requerir intervención.',
           'info'
         )
       }
-
-      void alertBot?.notify('WhatsApp conectado', 'La sesión de WhatsApp quedó activa y lista para relay.', 'info')
     })
 
     baileys.on('qr', (qr: string) => {
@@ -82,35 +81,27 @@ async function main(): Promise<void> {
       void alertBot?.sendQRPhoto()
     })
 
-    baileys.on('reconnecting', () => {
-      void alertBot?.notify('WhatsApp reconectando', 'Se detectó una reconexión automática del servicio de WhatsApp.', 'warning')
-    })
-
     baileys.on('disconnected', (info: any) => {
       const message = info?.shouldReconnect
         ? 'WhatsApp perdió conexión y está intentando reconectar.'
         : 'WhatsApp se desconectó y necesita re-autenticación.'
 
-      if (!info?.shouldReconnect) {
-        if (info?.authExpired) {
-          void alertBot?.notifyWhatsAppAuthRequired(
-            'Baileys recibio un 401 Unauthorized. La sesion local de WhatsApp parece caducada o revocada.'
-          )
-          return
-        }
-
-        void alertBot?.notify('WhatsApp desconectado', message, 'error')
+      // Los cortes que Baileys puede recuperar solo se registran en consola.
+      // Telegram se reserva para estados que requieren intervención humana.
+      if (info?.shouldReconnect) {
         return
       }
 
-      if (whatsappDisconnectTimer) {
-        clearTimeout(whatsappDisconnectTimer)
+      whatsappNeedsRecoveryNotice = true
+
+      if (info?.authExpired) {
+        void alertBot?.notifyWhatsAppAuthRequired(
+          'Baileys recibio un 401 Unauthorized. La sesion local de WhatsApp parece caducada o revocada.'
+        )
+        return
       }
 
-      whatsappDisconnectTimer = setTimeout(() => {
-        whatsappDisconnectNotified = true
-        void alertBot?.notify('WhatsApp desconectado', message, 'warning')
-      }, 10000)
+      void alertBot?.notify('WhatsApp desconectado', message, 'error')
     })
 
     telegram.on('connected', () => {
@@ -172,11 +163,6 @@ async function cleanup(): Promise<void> {
   console.log('\n🛑 Deteniendo servicios...')
 
   try {
-    if (whatsappDisconnectTimer) {
-      clearTimeout(whatsappDisconnectTimer)
-      whatsappDisconnectTimer = null
-    }
-
     await writeRuntimeState({
       status: 'stopped-cleanly',
       stoppedAt: new Date().toISOString()
