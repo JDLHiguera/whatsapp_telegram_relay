@@ -96,15 +96,23 @@ export class BridgeService {
       const messageContent = this.unwrapWhatsAppMessage(msg.message)
       let messageText = ''
       let isAudio = false
+      let isImage = false
+      let isVideo = false
+      let isDocument = false
 
       if (messageContent?.conversation) {
         messageText = messageContent.conversation
       } else if (messageContent?.extendedTextMessage?.text) {
         messageText = messageContent.extendedTextMessage.text
-      } else if (messageContent?.imageMessage?.caption) {
-        messageText = messageContent.imageMessage.caption
-      } else if (messageContent?.videoMessage?.caption) {
-        messageText = messageContent.videoMessage.caption
+      } else if (messageContent?.imageMessage) {
+        isImage = true
+        messageText = messageContent.imageMessage.caption || ''
+      } else if (messageContent?.videoMessage) {
+        isVideo = true
+        messageText = messageContent.videoMessage.caption || ''
+      } else if (messageContent?.documentMessage) {
+        isDocument = true
+        messageText = messageContent.documentMessage.title || messageContent.documentMessage.caption || '📄 Documento'
       } else if (messageContent?.audioMessage || messageContent?.ptt) {
         isAudio = true
         messageText = '🎙️ Audio'
@@ -115,19 +123,31 @@ export class BridgeService {
       try {
         this.relayTargets.set(botKey, whatsappJid)
 
-        // Si es audio, intentar descargar y enviar el archivo
-        if (isAudio) {
+        const isMedia = isAudio || isImage || isVideo || isDocument
+
+        // Si es multimedia, intentar descargar y enviar el archivo
+        if (isMedia) {
           try {
-            const audioPath = await this.downloadAudioFromWhatsApp(msg)
-            if (audioPath) {
-              await this.telegram.sendAudio(audioPath)
-              await fs.unlink(audioPath).catch(() => {})
+            let type: 'image' | 'video' | 'audio' | 'document' = 'audio'
+            if (isImage) type = 'image'
+            else if (isVideo) type = 'video'
+            else if (isDocument) type = 'document'
+
+            console.log(`📸 Descargando multimedia (${type}) desde WhatsApp...`)
+            const mediaPath = await this.downloadMediaFromWhatsApp(msg, type)
+            
+            if (mediaPath) {
+              const caption = messageText && messageText !== '🎙️ Audio' ? messageText : undefined
+              console.log(`📤 Enviando archivo ${type} a Telegram...`)
+              await this.telegram.sendFile(mediaPath, caption)
+              await fs.unlink(mediaPath).catch(() => {})
             } else {
-              await this.telegram.sendMessage('🎙️ Audio recibido en WhatsApp')
+              // Fallback a texto si falla la descarga
+              await this.telegram.sendMessage(`[${type.toUpperCase()}] Recibido en WhatsApp: ${messageText}`)
             }
           } catch (error) {
-            console.error(`❌ Error con audio:`, error)
-            await this.telegram.sendMessage('🎙️ Audio recibido en WhatsApp')
+            console.error(`❌ Error al relayar media (${isImage ? 'imagen' : isVideo ? 'video' : isAudio ? 'audio' : 'documento'}):`, error)
+            await this.telegram.sendMessage(`[MEDIA] Recibido en WhatsApp: ${messageText}`)
           }
         } else {
           console.log(`📲 WhatsApp: ${messageText}`)
@@ -147,19 +167,24 @@ export class BridgeService {
   }
 
   /**
-   * Descargar audio desde WhatsApp
+   * Descargar cualquier archivo multimedia desde WhatsApp
    */
-  private async downloadAudioFromWhatsApp(msg: any): Promise<string | null> {
+  private async downloadMediaFromWhatsApp(msg: any, type: 'image' | 'video' | 'audio' | 'document'): Promise<string | null> {
     try {
       // @ts-ignore
       const { downloadContentFromMessage } = await import('@whiskeysockets/baileys')
       
-      const audioMessage = msg.message?.audioMessage || msg.message?.ptt
-      if (!audioMessage?.url) {
+      const unwrapped = this.unwrapWhatsAppMessage(msg.message)
+      let mediaMessage = unwrapped?.[`${type}Message`]
+      if (type === 'audio' && !mediaMessage) {
+        mediaMessage = unwrapped?.ptt
+      }
+
+      if (!mediaMessage?.url) {
         return null
       }
 
-      const stream = await downloadContentFromMessage(audioMessage, 'audio')
+      const stream = await downloadContentFromMessage(mediaMessage, type)
       const chunks: any[] = []
 
       return new Promise((resolve, reject) => {
@@ -171,7 +196,16 @@ export class BridgeService {
             const tempDir = path.join(__dirname, '../../data/temp')
             await fs.mkdir(tempDir, { recursive: true })
 
-            const tempFilePath = path.join(tempDir, `audio_${Date.now()}.ogg`)
+            let ext = 'bin'
+            if (type === 'image') ext = 'jpg'
+            else if (type === 'video') ext = 'mp4'
+            else if (type === 'audio') ext = 'ogg'
+            else if (type === 'document') {
+              const mime = mediaMessage.mimetype || ''
+              ext = mime.split('/')[-1] || 'bin'
+            }
+
+            const tempFilePath = path.join(tempDir, `media_${type}_${Date.now()}.${ext}`)
             await fs.writeFile(tempFilePath, buffer)
 
             resolve(tempFilePath)
@@ -181,6 +215,7 @@ export class BridgeService {
         })
       })
     } catch (error) {
+      console.error(`Error downloading ${type} from WhatsApp:`, error)
       return null
     }
   }

@@ -123,6 +123,31 @@ export class TelegramService extends EventEmitter {
   }
 
   /**
+   * Enviar cualquier archivo (imagen, video, documento) al bot de Telegram
+   */
+  async sendFile(filePath: string, caption?: string): Promise<any> {
+    if (!this.isConnected || !this.client) {
+      throw new Error('Telegram no está conectado')
+    }
+
+    try {
+      const payload: any = {
+        file: filePath
+      }
+      
+      if (caption) {
+        payload.caption = caption
+      }
+
+      // @ts-ignore
+      return await this.client.sendFile(this.relayBotUsername, payload)
+    } catch (error) {
+      console.error('Error al enviar archivo a Telegram:', error)
+      throw error
+    }
+  }
+
+  /**
    * Manejar mensajes entrantes del bot externo
    */
   private async handleIncomingTelegramMessage(event: any): Promise<void> {
