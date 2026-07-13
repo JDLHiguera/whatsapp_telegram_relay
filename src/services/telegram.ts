@@ -133,15 +133,29 @@ export class TelegramService extends EventEmitter {
 
       const sender = await event.message.getSender().catch(() => null)
       const senderUsername = (sender as any)?.username?.toLowerCase()
+      const senderId = event.message.senderId?.toString()
 
-      if (senderUsername !== this.relayBotUsername) {
+      const isFromRelayBot = 
+        (senderUsername && senderUsername === this.relayBotUsername) ||
+        (senderId && senderId === '8509073799') // ID del bot como fallback
+
+      if (!isFromRelayBot) {
         return
       }
 
-      const text = String(event.message.message || event.message.text || '').trim()
+      let text = String(event.message.message || event.message.text || '').trim()
+      
+      // Soporte para RichMessage (mensajes enriquecidos nuevos de Telegram Layer 228+)
+      if (!text && event.message.richMessage) {
+        text = extractRichMessageText(event.message.richMessage)
+      }
       
       // Detectar si hay media (imagen, video, documento)
-      const hasMedia = event.message.photo || event.message.video || event.message.document
+      let hasMedia = event.message.photo || event.message.video || event.message.document
+      if (!hasMedia && event.message.richMessage) {
+        const rm = event.message.richMessage
+        hasMedia = (rm.photos && rm.photos.length > 0) || (rm.documents && rm.documents.length > 0)
+      }
       
       // Si no hay texto ni media, ignorar
       if (!text && !hasMedia) {
@@ -260,4 +274,27 @@ export class TelegramService extends EventEmitter {
       console.log('🔌 Telegram desconectado')
     }
   }
+}
+
+/**
+ * Extrae texto plano de la estructura RichMessage (mensajes enriquecidos con bloques)
+ */
+function extractRichMessageText(richMessage: any): string {
+  if (!richMessage || !Array.isArray(richMessage.blocks)) {
+    return ''
+  }
+
+  const texts: string[] = []
+  for (const block of richMessage.blocks) {
+    if (block) {
+      if (block.text) {
+        if (typeof block.text === 'string') {
+          texts.push(block.text)
+        } else if (typeof block.text === 'object' && typeof block.text.text === 'string') {
+          texts.push(block.text.text)
+        }
+      }
+    }
+  }
+  return texts.join('\n').trim()
 }
