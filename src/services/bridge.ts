@@ -227,6 +227,7 @@ export class BridgeService {
     const relayEvent = m as RelayEvent
     const botKey = (relayEvent.telegramChat || config.telegramRelayBotUsername).toLowerCase()
     const whatsappJid = this.relayTargets.get(botKey) || this.lockedWhatsAppJid
+    const messageText = this.normalizeEscapedLineBreaks(relayEvent.text)
 
     if (!whatsappJid) {
       console.log('⚠️ No hay chat de WhatsApp destino')
@@ -243,43 +244,43 @@ export class BridgeService {
         
         if (mediaPath) {
           // Enviar imagen a WhatsApp
-          await this.baileys.sendImage(whatsappJid, mediaPath, relayEvent.text || undefined)
+          await this.baileys.sendImage(whatsappJid, mediaPath, messageText || undefined)
           
           // Limpiar archivo temporal
           await fs.unlink(mediaPath).catch(() => {})
           
-          const caption = relayEvent.text ? `${relayEvent.text}` : '📸 Imagen'
+          const caption = messageText ? `${messageText}` : '📸 Imagen'
           console.log(`📸 Imagen relayada a WhatsApp: ${caption}`)
           
           await this.db.logMessage({
             fromPlatform: 'telegram',
             toPlatform: 'whatsapp',
             sender: botKey,
-            content: `[IMAGEN] ${relayEvent.text || 'Sin texto'}`
+            content: `[IMAGEN] ${messageText || 'Sin texto'}`
           })
         } else {
           console.error('❌ No se pudo descargar la media de Telegram')
-          if (relayEvent.text) {
+          if (messageText) {
             // Enviar al menos el texto si la media falló
-            await this.baileys.sendMessage(whatsappJid, relayEvent.text)
+            await this.baileys.sendMessage(whatsappJid, messageText)
             await this.db.logMessage({
               fromPlatform: 'telegram',
               toPlatform: 'whatsapp',
               sender: botKey,
-              content: relayEvent.text
+              content: messageText
             })
           }
         }
-      } else if (relayEvent.text) {
+      } else if (messageText) {
         // Solo texto
-        console.log(`💬 Telegram → WhatsApp: ${relayEvent.text.substring(0, 50)}...`)
-        await this.baileys.sendMessage(whatsappJid, relayEvent.text)
+        console.log(`💬 Telegram → WhatsApp: ${messageText.substring(0, 50)}...`)
+        await this.baileys.sendMessage(whatsappJid, messageText)
 
         await this.db.logMessage({
           fromPlatform: 'telegram',
           toPlatform: 'whatsapp',
           sender: botKey,
-          content: relayEvent.text
+          content: messageText
         })
       }
     } catch (error) {
@@ -323,6 +324,11 @@ export class BridgeService {
       || message?.viewOnceMessageV2?.message
       || message?.viewOnceMessage?.message
       || message
+  }
+
+  /** Convierte los saltos escapados recibidos de algunos bots en saltos reales. */
+  private normalizeEscapedLineBreaks(text: string): string {
+    return text.replace(/\\r\\n|\\n|\\r/g, '\n')
   }
 
   private startWhatsAppTyping(jid: string): number {
