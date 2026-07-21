@@ -70,6 +70,20 @@ export class TelegramService extends EventEmitter {
         new Raw({ types: [Api.UpdateUserTyping] })
       )
 
+      this.client.addEventHandler(
+        (update: Api.UpdateMessageReactions) => {
+          if (String((update.peer as any)?.userId) !== this.relayBotUserId) {
+            return
+          }
+
+          const results = (update.reactions as any)?.results || []
+          const emojiReaction = results.find((result: any) => result?.reaction instanceof Api.ReactionEmoji)
+          const emoji = emojiReaction ? String(emojiReaction.reaction.emoticon) : ''
+          this.emit('reaction', { messageId: update.msgId, emoji })
+        },
+        new Raw({ types: [Api.UpdateMessageReactions] })
+      )
+
       this.isConnected = true
       console.log(`✅ Telegram conectado. Relay activo con @${this.relayBotUsername}`)
       this.emit('connected')

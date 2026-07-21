@@ -220,6 +220,22 @@ export class BaileysService extends EventEmitter {
     }
   }
 
+  /** Añade o retira la reacción de esta cuenta a un mensaje existente. */
+  async reactToMessage(jid: string, messageKey: any, emoji: string): Promise<any> {
+    if (!this.sock) {
+      throw new Error('WhatsApp no esta conectado')
+    }
+
+    try {
+      return await this.sock.sendMessage(jid, {
+        react: { text: emoji, key: messageKey }
+      })
+    } catch (error) {
+      console.error('Error al reaccionar al mensaje:', error)
+      throw error
+    }
+  }
+
   async checkNumberExists(number: string): Promise<boolean> {
     if (!this.sock) {
       throw new Error('WhatsApp no esta conectado')

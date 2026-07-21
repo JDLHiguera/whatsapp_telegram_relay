@@ -14,6 +14,7 @@ export class BridgeService {
   private telegram: TelegramService
   private db: Database
   private relayTargets: Map<string, string> = new Map()
+  private telegramMessageTargets: Map<number, { whatsappJid: string; messageKey: any }> = new Map()
   private lockedWhatsAppJid: string | null = null
   private typingExpiryTimer: ReturnType<typeof setTimeout> | null = null
   private typingGeneration = 0
@@ -57,6 +58,14 @@ export class BridgeService {
         this.startWhatsAppTyping(whatsappJid)
       } else {
         void this.stopWhatsAppTyping(whatsappJid)
+      }
+    })
+
+    this.telegram.on('reaction', async (reaction: { messageId: number; emoji: string }) => {
+      try {
+        await this.handleTelegramReaction(reaction)
+      } catch (error) {
+        console.error('❌ Error procesando reacción de Telegram:', error)
       }
     })
   }
@@ -122,6 +131,7 @@ export class BridgeService {
 
       try {
         this.relayTargets.set(botKey, whatsappJid)
+        const messageKey = { ...msg.key, remoteJid: whatsappJid }
 
         const isMedia = isAudio || isImage || isVideo || isDocument
 
@@ -139,19 +149,23 @@ export class BridgeService {
             if (mediaPath) {
               const caption = messageText && messageText !== '🎙️ Audio' ? messageText : undefined
               console.log(`📤 Enviando archivo ${type} a Telegram...`)
-              await this.telegram.sendFile(mediaPath, caption)
+              const telegramMessage = await this.telegram.sendFile(mediaPath, caption)
+              await this.rememberTelegramMessage(telegramMessage, whatsappJid, messageKey)
               await fs.unlink(mediaPath).catch(() => {})
             } else {
               // Fallback a texto si falla la descarga
-              await this.telegram.sendMessage(`[${type.toUpperCase()}] Recibido en WhatsApp: ${messageText}`)
+              const telegramMessage = await this.telegram.sendMessage(`[${type.toUpperCase()}] Recibido en WhatsApp: ${messageText}`)
+              await this.rememberTelegramMessage(telegramMessage, whatsappJid, messageKey)
             }
           } catch (error) {
             console.error(`❌ Error al relayar media (${isImage ? 'imagen' : isVideo ? 'video' : isAudio ? 'audio' : 'documento'}):`, error)
-            await this.telegram.sendMessage(`[MEDIA] Recibido en WhatsApp: ${messageText}`)
+            const telegramMessage = await this.telegram.sendMessage(`[MEDIA] Recibido en WhatsApp: ${messageText}`)
+            await this.rememberTelegramMessage(telegramMessage, whatsappJid, messageKey)
           }
         } else {
           console.log(`📲 WhatsApp: ${messageText}`)
-          await this.telegram.sendMessage(messageText)
+          const telegramMessage = await this.telegram.sendMessage(messageText)
+          await this.rememberTelegramMessage(telegramMessage, whatsappJid, messageKey)
         }
 
         await this.db.logMessage({
@@ -288,14 +302,51 @@ export class BridgeService {
     }
   }
 
+  /** Reproduce en WhatsApp la reacción del bot al mensaje que se le reenvió. */
+  private async handleTelegramReaction(reaction: { messageId: number; emoji: string }): Promise<void> {
+    const target = this.telegramMessageTargets.get(reaction.messageId)
+    if (!target) {
+      return
+    }
+
+    await this.baileys.reactToMessage(target.whatsappJid, target.messageKey, reaction.emoji)
+    console.log(`😀 Reacción Telegram → WhatsApp: ${reaction.emoji || 'eliminada'}`)
+  }
+
+  private async rememberTelegramMessage(telegramMessage: any, whatsappJid: string, messageKey: any): Promise<void> {
+    const messageId = Number(telegramMessage?.id)
+    if (!Number.isInteger(messageId)) {
+      console.warn('No se pudo guardar el vínculo del mensaje enviado a Telegram')
+      return
+    }
+
+    this.telegramMessageTargets.set(messageId, { whatsappJid, messageKey })
+    while (this.telegramMessageTargets.size > 250) {
+      const oldestMessageId = this.telegramMessageTargets.keys().next().value
+      if (oldestMessageId === undefined) {
+        break
+      }
+      this.telegramMessageTargets.delete(oldestMessageId)
+    }
+    await this.saveRelayState(whatsappJid)
+  }
+
   private async loadRelayState(): Promise<void> {
     try {
       const raw = await fs.readFile(config.relayStatePath, 'utf8')
-      const parsed = JSON.parse(raw) as { whatsappJid?: string }
+      const parsed = JSON.parse(raw) as {
+        whatsappJid?: string
+        telegramMessageTargets?: Array<[number, { whatsappJid: string; messageKey: any }]>
+      }
       if (parsed.whatsappJid) {
         this.lockedWhatsAppJid = parsed.whatsappJid
         this.relayTargets.set(config.telegramRelayBotUsername.toLowerCase(), parsed.whatsappJid)
         console.log(`🔁 Relay restaurado para ${parsed.whatsappJid}`)
+      }
+      for (const [messageId, target] of parsed.telegramMessageTargets || []) {
+        if (Number.isInteger(messageId) && target?.whatsappJid && target?.messageKey) {
+          this.telegramMessageTargets.set(messageId, target)
+        }
       }
     } catch {
       // No hay estado previo
@@ -306,7 +357,11 @@ export class BridgeService {
     await fs.mkdir(path.dirname(config.relayStatePath), { recursive: true })
     await fs.writeFile(
       config.relayStatePath,
-      JSON.stringify({ whatsappJid, botUsername: config.telegramRelayBotUsername }, null, 2),
+      JSON.stringify({
+        whatsappJid,
+        botUsername: config.telegramRelayBotUsername,
+        telegramMessageTargets: Array.from(this.telegramMessageTargets.entries())
+      }, null, 2),
       'utf8'
     )
   }
@@ -369,6 +424,7 @@ export class BridgeService {
 
     this.lockedWhatsAppJid = null
     this.relayTargets.clear()
+    this.telegramMessageTargets.clear()
 
     try {
       await fs.unlink(config.relayStatePath)
